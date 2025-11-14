@@ -6,4 +6,4 @@ The overall goal is to develop a monitoring solution for COMCS.Lda, a company th
 ## Solution (how)
 
 ### Arquitecture
-![COMCS.Lda Arquitecture](./graphviz/comcs-lda.png "COMCS.Lda Arquitecture")
+![COMCS.Lda Arquitecture](./problem-spec/arquitecture/comcs-lda.png "COMCS.Lda Arquitecture")
