@@ -1,0 +1,69 @@
+digraph SystemArchitecture {
+    // Graph settings
+    rankdir=LR;
+    splines=true;
+    overlap=false;
+    nodesep=0.6;
+    ranksep=1.2;
+    fontname="Inter";
+
+    // Default node and edge styles
+    node [shape=record, style="filled", fillcolor="#ffffff", fontname="Inter"];
+    edge [fontname="Inter", fontsize=10];
+
+    // Subgraph for Physical Environment
+    subgraph cluster_A {
+        label = "Physical Environment (Edge)";
+        style="filled,rounded";
+        fillcolor="#f5f5f5"; // Light gray
+        node [fillcolor="#e0e0e0"];
+        ENV [label="Work Cell / Warehouse"];
+    }
+
+    // Subgraph for Edge Tier
+    subgraph cluster_B {
+        label = "Edge Tier: Monitoring";
+        style="filled,rounded";
+        fillcolor="#f5f5f5"; // Light gray
+        node [fillcolor="#e0e0e0"];
+        CLIENTS [label="Monitoring Clients\n(ESP32 & RPi Pico + DHT11)"];
+        SPIFFS [label="SPIFFS Rolling Window"];
+
+        // Internal data flow for resilience
+        CLIENTS -> SPIFFS [label="Internal File I/O", dir=both, style=dashed, fontsize=9];
+    }
+
+    // Subgraph for Backend Tier
+    subgraph cluster_C {
+        label = "Backend Tier: Data Processing";
+        style="filled,rounded";
+        fillcolor="#fde7fd"; // Light pink
+        node [fillcolor="#fbc0fa"];
+        MQTT [label="MQTT Broker"];
+        UDP [label="Alert Server (UDP)\nVM"];
+    }
+
+    // Subgraph for Presentation Tier
+    subgraph cluster_D {
+        label = "Presentation Tier: Visualization";
+        style="filled,rounded";
+        fillcolor="#e0f7fa"; // Light blue
+        node [fillcolor="#b2ebf2"];
+        CC [label="Command Centre\n(Node-RED)"];
+    }
+
+    // Main Data Flows
+    ENV -> CLIENTS [label=" 1. Senses (Temp/Humidity)"];
+    CLIENTS -> MQTT [label=" 2. Publish Sensor Data (smartdata)"];
+    CLIENTS -> UDP [label=" 3. Send Sensor Data (smartdata, UDP+QoS)"];
+    UDP -> UDP [label=" 4. Analyzes & Validates Data"];
+    UDP -> MQTT [label=" 5. Publish Alerts (smartdata)"];
+    MQTT -> CC [label=" 6. Subscribe (Data & Alerts)"];
+
+    // Resilience Flow
+    SPIFFS -> MQTT [label=" 7. Send Stored Data (on restore)", style=dotted, constraint=false];
+    SPIFFS -> UDP [label=" 7. Send Stored Data (on restore)", style=dotted, constraint=false];
+
+    // Bonus Flow
+    CLIENTS -> CC [label=" Bonus: BLE Redundancy", style=dotted, constraint=false];
+}
