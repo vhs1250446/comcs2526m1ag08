@@ -28,11 +28,13 @@
 // DHT Sensor Configuration
 #define DHTPIN 21
 #define DHTTYPE DHT11
+#define SENSOR_READ_INTERVAL_MS 5000
 
 // Storage file path
 #define STORAGE_FILE "/storage.dat"
 
 // WiFi Configuration
+#define NETWORK_WAIT_MS 00000
 //static const char* ssid = "labs";
 //static const char* password = "782edcwq#";
 static const char* ssid = "jolteon";
@@ -50,13 +52,18 @@ static const int   mqtt_port = 8883;
 static const char* mqtt_username = "comcs2526g08";
 static const char* mqtt_password = "Bolofofo123";
 static const char* mqtt_topic_sensors = "/comcs/g08/sensors";
-static const unsigned long MQTT_RETRY_INTERVAL_MS = 3000;
 
 // UDP Configuration
-static const char* udpAddress = "IP_OF_YOUR_UDP_SERVER";
+static const char* udpAddress = "192.168.25.64";
 static const int   udpPort = 9999;
-static const int   UDP_ACK_TIMEOUT_MS = 1000;
+static const int   UDP_LOCAL_PORT = 12001;
+static const int   UDP_ACK_TIMEOUT_MS = 500;
 static const int   UDP_RETRIES = 3;
+
+// UDP QoS Policy (change before flashing)
+#define UDP_QOS_BEST_EFFORT 0
+#define UDP_QOS_GUARANTEED 1
+static const uint8_t UDP_QOS_LEVEL = UDP_QOS_GUARANTEED;  // Set to UDP_QOS_GUARANTEED for reliable delivery
 
 
 // ============================================================================
@@ -78,6 +85,12 @@ typedef struct {
   float avgTemperature;
   float avgHumidity;
 } TelemetryData;
+
+struct UdpQoSHeader {
+  uint32_t seq;
+  uint8_t qos;
+  uint8_t flags;  // bit0: retransmission
+} __attribute__((packed));
 
 
 // ============================================================================
@@ -105,6 +118,9 @@ static WiFiClientSecure espClient;
 static PubSubClient client(espClient);
 static WiFiUDP udp;
 
+// UDP QoS tracking
+static uint32_t udp_seq = 0;
+
 
 // ============================================================================
 // UTILITY FUNCTIONS
@@ -131,11 +147,6 @@ void fatal_reboot(const char* reason) {
   while (true) { delay(100); }
 }
 
-int mutex_init() {
-  STORAGE_MUTEX = xSemaphoreCreateMutex();
-  return STORAGE_MUTEX != NULL ? 0 : -1;
-}
-
 String get_iso_time(struct tm timestamp) {
   char data[100];
 
@@ -158,17 +169,37 @@ float get_average(float* buffer) {
   return sum / WINDOW_SIZE;
 }
 
+String format_payload(TelemetryData data) {
+  StaticJsonDocument<512> doc;
+  String payload;
+
+  doc["id"] = "urn:ngsi-ld:WeatherObserved:COMCS-G08-ESP32";
+  doc["type"] = "WeatherObserved";
+  doc["dateObserved"] = get_iso_time(data.timestamp);
+  doc["temperature"] = data.temperature;
+  doc["humidity"] = data.humidity;
+  doc["averageTemperature"] = data.avgTemperature;
+  doc["averageHumidity"] = data.avgHumidity;
+
+  serializeJson(doc, payload);
+
+  return payload;
+}
 
 // ============================================================================
 // STORAGE FUNCTIONS
 // ============================================================================
+
+int mutex_init() {
+  STORAGE_MUTEX = xSemaphoreCreateMutex();
+  return STORAGE_MUTEX != NULL ? 0 : -1;
+}
 
 int filesystem_init(bool formatOnFail) {
   return SPIFFS.begin(formatOnFail) ? 0 : -1;
 }
 
 int storage_init() {
-
   size_t expectedSize = sizeof(StorageHeader) + (size_t)WINDOW_SIZE * sizeof(TelemetryData);
   bool needsCreation = true;
 
@@ -262,11 +293,10 @@ void storage_put(TelemetryData data) {
       mqtt_read_index = (mqtt_read_index + 1) % WINDOW_SIZE;
       mqtt_overwritten = true;
     }
-    /*if (write_index == udp_read_index) {
+    if (write_index == udp_read_index) {
       udp_read_index = (udp_read_index + 1) % WINDOW_SIZE;
       udp_overwritten = true;
-      Serial.println("Core 1: [STORAGE] UDP oldest entry overwritten.");
-    }*/
+    }
 
     // Update header
     header.write_index = write_index;
@@ -334,27 +364,6 @@ void storage_dump() {
 }
 
 // ============================================================================
-// NETWORK PAYLOAD FORMATTING
-// ============================================================================
-
-static String format_payload(TelemetryData data) {
-  StaticJsonDocument<512> doc;
-  String payload;
-
-  doc["id"] = "urn:ngsi-ld:WeatherObserved:COMCS-G08-01-ESP32";
-  doc["type"] = "WeatherObserved";
-  doc["dateObserved"] = get_iso_time(data.timestamp);
-  doc["temperature"] = data.temperature;
-  doc["humidity"] = data.humidity;
-  doc["averageTemperature"] = data.avgTemperature;
-  doc["averageHumidity"] = data.avgHumidity;
-
-  serializeJson(doc, payload);
-
-  return payload;
-}
-
-// ============================================================================
 // MQTT FUNCTIONS
 // ============================================================================
 
@@ -409,7 +418,7 @@ void mqtt_publish() {
   
   xSemaphoreGive(STORAGE_MUTEX);
   
-  // send data
+  // Send data
   payload = format_payload(data);
 
   if (client.publish(mqtt_topic_sensors, payload.c_str())) {
@@ -433,31 +442,90 @@ void mqtt_publish() {
 // UDP FUNCTIONS
 // ============================================================================
 
-bool send_udp_with_qos(const char* payload) {
-  for (int i = 0; i < UDP_RETRIES; i++) {
-    udp.beginPacket(udpAddress, udpPort);
-    udp.print(payload);
-    if (udp.endPacket() == 0) continue;
-    
-    unsigned long ackStartTime = millis();
-    while (millis() - ackStartTime < (unsigned long)UDP_ACK_TIMEOUT_MS) {
-      if (udp.parsePacket() > 0) {
-        char ackBuf[4];
-        udp.read(ackBuf, 3);
-        ackBuf[3] = '\0';
-        if (strcmp(ackBuf, "ACK") == 0) return true;
-      }
-    }
+bool send_udp_best_effort(const char* payload) {
+  UdpQoSHeader hdr;
+  hdr.seq = udp_seq;
+  hdr.qos = UDP_QOS_BEST_EFFORT;
+  hdr.flags = 0;
+
+  udp.beginPacket(udpAddress, udpPort);
+  udp.write((uint8_t*)&hdr, sizeof(hdr));
+  udp.print(payload);
+  bool sent = udp.endPacket() != 0;
+  if (sent) {
+    Serial.printf("Core 0: [UDP] Best-effort sent seq=%lu\n", (unsigned long)udp_seq);
+    udp_seq++;
   }
+  return sent;
+}
+
+bool send_udp_guaranteed(const char* payload) {
+  UdpQoSHeader hdr;
+  hdr.seq = udp_seq;
+  hdr.qos = UDP_QOS_GUARANTEED;
+  hdr.flags = 0;
+
+  // Retry with ACK
+  for (int attempt = 0; attempt < UDP_RETRIES; attempt++) {
+    hdr.flags = (attempt > 0) ? 0x01 : 0x00;
+    
+    udp.beginPacket(udpAddress, udpPort);
+    udp.write((uint8_t*)&hdr, sizeof(hdr));
+    udp.print(payload);
+    if (!udp.endPacket()) {
+      Serial.printf("Core 0: [UDP] Send failed seq=%lu attempt=%d\n", 
+                    (unsigned long)udp_seq, attempt + 1);
+      continue;
+    }
+
+    // Wait for ACK
+    unsigned long start = millis();
+    while (millis() - start < UDP_ACK_TIMEOUT_MS) {
+      int len = udp.parsePacket();
+      if (len > 0) {
+        char ackBuf[32];
+        int n = udp.read(ackBuf, sizeof(ackBuf) - 1);
+        if (n > 0) {
+          ackBuf[n] = 0;
+          if (strncmp(ackBuf, "ACK ", 4) == 0) {
+            uint32_t ackSeq = strtoul(ackBuf + 4, nullptr, 10);
+            if (ackSeq == udp_seq) {
+              Serial.printf("Core 0: [UDP] Guaranteed delivery seq=%lu (attempt %d)\n", 
+                           (unsigned long)udp_seq, attempt + 1);
+              udp_seq++;
+              return true;
+            }
+          }
+        }
+      }
+      delay(10);
+    }
+    
+    Serial.printf("Core 0: [UDP] Timeout seq=%lu attempt=%d\n", 
+                  (unsigned long)udp_seq, attempt + 1);
+  }
+
+  Serial.printf("Core 0: [UDP] Guaranteed delivery FAILED seq=%lu after %d attempts\n", 
+                (unsigned long)udp_seq, UDP_RETRIES);
   return false;
 }
 
-void send_one_udp_entry() {
+bool send_udp_with_qos(const char* payload) {
+  if (UDP_QOS_LEVEL == UDP_QOS_BEST_EFFORT) {
+    return send_udp_best_effort(payload);
+  } else {
+    return send_udp_guaranteed(payload);
+  }
+}
+
+void udp_publish() {
+  File storage;
   TelemetryData data;
-  int current_read_index = -1;
+  String payload;
+  int current_read_index;
   
-  // Read data from buffer
-  if (xSemaphoreTake(STORAGE_MUTEX, (TickType_t)10) != pdTRUE) return;
+  if (xSemaphoreTake(STORAGE_MUTEX, (TickType_t)10) != pdTRUE)
+    return;
   
   if (write_index == udp_read_index) {
     xSemaphoreGive(STORAGE_MUTEX);
@@ -465,21 +533,25 @@ void send_one_udp_entry() {
   }
   
   current_read_index = udp_read_index;
-  File storageFile = SPIFFS.open(STORAGE_FILE, "r");
-  bool fileOk = false;
-  if (storageFile) {
-    storageFile.seek(DATA_OFFSET(current_read_index));
-    storageFile.read((uint8_t*)&data, sizeof(TelemetryData));
-    storageFile.close();
-    fileOk = true;
+  storage = SPIFFS.open(STORAGE_FILE, "r");
+  if (!storage) {
+    xSemaphoreGive(STORAGE_MUTEX);
+    Serial.println("Core 0: [UDP] Failed to open storage file for reading!");
+    return;
   }
-  xSemaphoreGive(STORAGE_MUTEX);
-  
-  if (!fileOk) return;
 
-  // Send data
-  String payload = format_payload(data);
-  if (send_udp_with_qos(payload.c_str())) {
+  storage.seek(DATA_OFFSET(current_read_index));
+  storage.read((uint8_t*)&data, sizeof(TelemetryData));
+  storage.close();
+  
+  xSemaphoreGive(STORAGE_MUTEX);
+
+  payload = format_payload(data);
+  bool success = send_udp_with_qos(payload.c_str());
+
+  // Handle result based on QoS level
+  if (success || UDP_QOS_LEVEL == UDP_QOS_BEST_EFFORT) {
+    // Advance index for successful sends or best-effort mode (accept loss)
     if (xSemaphoreTake(STORAGE_MUTEX, portMAX_DELAY) == pdTRUE) {
       if (udp_read_index == current_read_index) {
         udp_read_index = (udp_read_index + 1) % WINDOW_SIZE;
@@ -488,19 +560,14 @@ void send_one_udp_entry() {
       xSemaphoreGive(STORAGE_MUTEX);
     }
   } else {
-    Serial.println("Core 0: UDP QoS failed. Will retry.");
+    // Guaranteed delivery failed - will retry next cycle
+    Serial.println("Core 0: [UDP] Guaranteed delivery failed. Will retry next cycle.");
   }
 }
 
 // ============================================================================
 // NETWORK FUNCTIONS
 // ============================================================================
-
-int sensor_init() {
-  dht.begin();
-  return 0;
-}
-
 
 int network_init() {
   // Wifi
@@ -515,7 +582,9 @@ int network_init() {
   client.setServer(mqtt_server, mqtt_port);
 
   // UDP
-  // No special initialization needed
+  udp.begin(UDP_LOCAL_PORT);
+  Serial.printf("UDP initialized (QoS: %s)\n", 
+                UDP_QOS_LEVEL == UDP_QOS_GUARANTEED ? "GUARANTEED" : "BEST_EFFORT");
   
   return 0;
 }
@@ -528,7 +597,16 @@ void network_publish() {
    mqtt_publish();
   }
   
-  // send_one_udp_entry();
+  udp_publish();
+}
+
+// ============================================================================
+// SENSOR FUNCTIONS
+// ============================================================================
+
+int sensor_init() {
+  dht.begin();
+  return 0;
 }
 
 // ============================================================================
@@ -553,7 +631,7 @@ void setup() {
   xTaskCreatePinnedToCore(sensor_loop, "SensorTask", 4096, NULL, 1, &sensorTaskHandle, 1);
 
   Serial.println("Starting network task on Core 0...");
-  delay(22000); // give some time for the sensor task to start
+  delay(NETWORK_WAIT_MS); // give some time for the sensor task to start
 }
 
 // Sensor Loop (runs on Core 1)
@@ -590,9 +668,9 @@ void sensor_loop(void *pvParameters) {
       getLocalTime(&currentReading.timestamp);
       currentReading.temperature = temperature;
       currentReading.humidity = humidity;
-        // Note: average calculation is local to this task
-        //       this way we avoid averaging over data outside the
-        //       current sensor loop lifecycle
+      // Note: average calculation is local to this task
+      //       this way we avoid averaging over data outside the
+      //       current sensor loop lifecycle
       currentReading.avgTemperature = get_average(tempBuffer);
       currentReading.avgHumidity = get_average(humidBuffer);
 
@@ -604,7 +682,7 @@ void sensor_loop(void *pvParameters) {
                   + "|AvgT=" + String(currentReading.avgTemperature)
                   + "|AvgH=" + String(currentReading.avgHumidity));
 
-    vTaskDelay(1000 / portTICK_PERIOD_MS);
+    vTaskDelay(SENSOR_READ_INTERVAL_MS / portTICK_PERIOD_MS);
   }
 }
 
