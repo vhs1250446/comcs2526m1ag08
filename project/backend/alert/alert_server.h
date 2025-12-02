@@ -16,15 +16,18 @@
 #define MAX_CLIENTS 10
 #define MQTT_ALERT_TOPIC "/comcs/g08/alerts"
 
-// Validation thresholds (Story 2.2)
+// Validation thresholds
 #define TEMP_MIN 0.0
 #define TEMP_MAX 50.0
 #define HUMIDITY_MIN 20.0
 #define HUMIDITY_MAX 80.0
 
-// Fluctuation thresholds (Story 2.3)
+// Fluctuation thresholds
 #define TEMP_DIFF_THRESHOLD 2.0
 #define HUMIDITY_DIFF_THRESHOLD 5.0
+
+// Timestamp staleness threshold (seconds)
+#define MAX_READING_AGE_SEC 30
 
 // UDP QoS Header (matches ESP32 format)
 #define UDP_QOS_BEST_EFFORT 0
@@ -61,7 +64,8 @@ typedef struct {
 void* handle_client(void* arg);
 int validate_sensor_data(SensorData* data, char* alert_msg);
 int check_fluctuation(SensorData* data, char* alert_msg);
-void send_mqtt_alert(const char* alert_type, const char* message, SensorData* data);
+void send_range_alert(const char* message, SensorData* data);
+void send_fluctuation_alert(const char* message);
 void send_ack(struct sockaddr_storage* client_addr, socklen_t addr_len, uint32_t seq);
 int parse_sensor_data(const char* json, SensorData* data);
 int mqtt_init(void);

@@ -33,3 +33,24 @@ $(TARGET): $(OBJS)
 clean:
 	rm -f $(OBJS) $(TARGET)
 	@echo "Cleaned build artifacts"
+
+# =============================
+# Test client build and runner
+# =============================
+
+TEST_TARGET = tests/qos_test
+TEST_SRCS = tests/qos_test.c
+
+.PHONY: test test-build
+
+test-build: $(TARGET) $(TEST_TARGET)
+
+$(TEST_TARGET): $(TEST_SRCS)
+	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)
+
+# Run tests: start server, run client, then stop server
+test: test-build
+	./$(TARGET) & echo $$! > alert.pid; \
+	sleep 1; \
+	./$(TEST_TARGET); \
+	kill `cat alert.pid`; rm -f alert.pid

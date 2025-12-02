@@ -7,7 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
-#include "../alert.h"
+#include "../alert_server.h"
 #include "../lib/cJSON.h"
 
 /*

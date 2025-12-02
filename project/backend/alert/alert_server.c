@@ -90,7 +90,7 @@ int main(void) {
 
   printf("Server listening on port %s...\n\n", UDP_PORT);
 
-  // Main server loop - receives data and spawns threads (Story 2.1: Concurrent processing)
+  // Main server loop - receives data and spawns threads
   while (running) {
     int recv_len;
     memset(buffer, 0, BUFFER_SIZE);
@@ -153,7 +153,7 @@ int main(void) {
       request->has_qos = 0;
     }
 
-    // Create thread to handle request (Story 2.1: Concurrent handling)
+    // Create thread to handle request
     pthread_t thread;
     if (pthread_create(&thread, NULL, handle_client, request) != 0) {
       printf("Thread creation failed\n");
@@ -195,7 +195,7 @@ void* handle_client(void* arg) {
     fprintf(stderr, "[STORE] Failed to store data for: %s\n", data.sensor_id);
   }
 
-  // Send ACK for guaranteed delivery (Story 2.4)
+  // Send ACK for guaranteed delivery
   if (request->has_qos && request->qos_level == UDP_QOS_GUARANTEED) {
     socklen_t addr_len = (request->client_addr.ss_family == AF_INET) 
                           ? sizeof(struct sockaddr_in) 
@@ -206,12 +206,12 @@ void* handle_client(void* arg) {
   // Data Range Validation
   range_violation = validate_sensor_data(&data, alert_msg);
   if (range_violation)
-    send_mqtt_alert("range_violation", alert_msg, &data);
+    send_range_alert(alert_msg, &data);
 
   // Data Fluctuation Analysis
   fluctuation_alert = check_fluctuation(&data, alert_msg);
   if (fluctuation_alert)
-    send_mqtt_alert("fluctuation", alert_msg, &data);
+    send_fluctuation_alert(alert_msg);
 
   free(request);
   return NULL;
@@ -222,7 +222,7 @@ int validate_sensor_data(SensorData* data, char* alert_msg) {
   char temp_buf[256];
   alert_msg[0] = '\0';
 
-  // Check temperature range (EO 2.d)
+  // Check temperature range
   if (data->temperature < TEMP_MIN || data->temperature > TEMP_MAX) {
     snprintf(temp_buf, sizeof(temp_buf),
              "Temp OUT OF RANGE: %.2f°C (valid: %.1f-%.1f°C)\n",
@@ -231,7 +231,7 @@ int validate_sensor_data(SensorData* data, char* alert_msg) {
     alert = 1;
   }
 
-  // Check humidity range (EO 2.d)
+  // Check humidity range
   if (data->humidity < HUMIDITY_MIN || data->humidity > HUMIDITY_MAX) {
     snprintf(temp_buf, sizeof(temp_buf),
              "Hum OUT OF RANGE: %.2f%% (valid: %.1f-%.1f%%)\n",
@@ -254,6 +254,7 @@ int validate_sensor_data(SensorData* data, char* alert_msg) {
 int check_fluctuation(SensorData* current, char* alert_msg) {
   int alert = 0;
   int device_counter = 0;
+  int stale_counter = 0;
   float max_temp_diff = 0.0f;
   float max_humidity_diff = 0.0f;
   char temp_buf[1024];
@@ -261,11 +262,35 @@ int check_fluctuation(SensorData* current, char* alert_msg) {
   if (!current || !alert_msg) return 0;
   alert_msg[0] = '\0';
 
-  // Iterate over all stored devices and compare with current (exclude self)
+  // Parse current timestamp
+  struct tm current_tm = {0};
+  time_t current_time = 0;
+  if (strptime(current->timestamp, "%Y-%m-%dT%H:%M:%SZ", &current_tm) != NULL) {
+    current_time = timegm(&current_tm);
+  }
+
+  // Iterate over all stored devices and compare with current (exclude self and stale)
   for (int b = 0; b < KV_HASH_SIZE; ++b) {
     struct kv_node* node = device_store.buckets[b];
     while (node) {
       if (strcmp(node->data.sensor_id, current->sensor_id) != 0) {
+        // Parse stored sensor timestamp
+        struct tm stored_tm = {0};
+        time_t stored_time = 0;
+        if (strptime(node->data.timestamp, "%Y-%m-%dT%H:%M:%SZ", &stored_tm) != NULL) {
+          stored_time = timegm(&stored_tm);
+        }
+
+        // Check if reading is stale
+        if (current_time > 0 && stored_time > 0) {
+          double age = difftime(current_time, stored_time);
+          if (age > MAX_READING_AGE_SEC || age < -MAX_READING_AGE_SEC) {
+            stale_counter++;
+            node = node->next;
+            continue; // Skip stale reading
+          }
+        }
+
         device_counter++;
         float tdiff = fabs(current->temperature - node->data.temperature);
         float hdiff = fabs(current->humidity - node->data.humidity);
@@ -301,10 +326,11 @@ int check_fluctuation(SensorData* current, char* alert_msg) {
 
   if (alert) {
     snprintf(temp_buf, sizeof(temp_buf),
-           "Summary: Sensor=%s Time=%s ComparedDevices=%d MaxTempDiff=%.2f MaxHumDiff=%.2f\n",
+           "Summary: Sensor=%s Time=%s ComparedDevices=%d Stale=%d MaxTempDiff=%.2f MaxHumDiff=%.2f\n",
            current->sensor_id,
            current->timestamp,
            device_counter,
+           stale_counter,
            max_temp_diff,
            max_humidity_diff);
     strcat(alert_msg, temp_buf);
@@ -313,9 +339,6 @@ int check_fluctuation(SensorData* current, char* alert_msg) {
   return alert;
 }
 
-/*
- * Story 2.4: Send ACK for guaranteed delivery
- */
 void send_ack(struct sockaddr_storage* client_addr, socklen_t addr_len, uint32_t seq) {
   char ack_buf[32];
   snprintf(ack_buf, sizeof(ack_buf), "ACK %u", seq);
@@ -330,34 +353,68 @@ void send_ack(struct sockaddr_storage* client_addr, socklen_t addr_len, uint32_t
   }
 }
 
-
-void send_mqtt_alert(const char* alert_type, const char* message, SensorData* data) {
-  if (!alert_type || !message || !data)
-    return;
+void send_range_alert(const char* message, SensorData* data) {
+  if (!message || !data) return;
 
   cJSON *root = cJSON_CreateObject();
-  if (!root)
-    return;
+  if (!root) return;
 
-  cJSON_AddStringToObject(root, "alertType", alert_type);
+  cJSON_AddStringToObject(root, "alertType", "range_violation");
   cJSON_AddStringToObject(root, "sensorId", data->sensor_id);
   cJSON_AddStringToObject(root, "timestamp", data->timestamp);
   cJSON_AddNumberToObject(root, "temperature", data->temperature);
   cJSON_AddNumberToObject(root, "humidity", data->humidity);
-  cJSON_AddNumberToObject(root, "avgTemperature", data->avgTemperature);
-  cJSON_AddNumberToObject(root, "avgHumidity", data->avgHumidity);
   cJSON_AddStringToObject(root, "message", message);
 
   char* json_str = cJSON_PrintUnformatted(root);
-  if (!json_str) {
-    cJSON_Delete(root);
-    return;
-  }
-
+  if (!json_str) { cJSON_Delete(root); return; }
   if (mqtt_publish(MQTT_ALERT_TOPIC, json_str) != 0) {
-    fprintf(stderr, "Failed to publish MQTT alert\n");
+    fprintf(stderr, "Failed to publish MQTT range alert\n");
   }
+  cJSON_free(json_str);
+  cJSON_Delete(root);
+}
 
+void send_fluctuation_alert(const char* message) {
+  if (!message) return;
+
+  cJSON *root = cJSON_CreateObject();
+  if (!root) return;
+
+  cJSON_AddStringToObject(root, "alertType", "fluctuation_violation");
+
+  // Timestamp as now (server time) since multiple sensors are involved
+  char tsbuf[64];
+  time_t now = time(NULL);
+  struct tm t;
+  gmtime_r(&now, &t);
+  snprintf(tsbuf, sizeof(tsbuf), "%04d-%02d-%02dT%02d:%02d:%02dZ",
+           t.tm_year + 1900, t.tm_mon + 1, t.tm_mday,
+           t.tm_hour, t.tm_min, t.tm_sec);
+  cJSON_AddStringToObject(root, "timestamp", tsbuf);
+
+  // Build sensors array with temp & humidity
+  cJSON *arr = cJSON_CreateArray();
+  if (!arr) { cJSON_Delete(root); return; }
+  for (int b = 0; b < KV_HASH_SIZE; ++b) {
+    struct kv_node* node = device_store.buckets[b];
+    while (node) {
+      cJSON *item = cJSON_CreateObject();
+      cJSON_AddStringToObject(item, "sensorId", node->data.sensor_id);
+      cJSON_AddNumberToObject(item, "temperature", node->data.temperature);
+      cJSON_AddNumberToObject(item, "humidity", node->data.humidity);
+      cJSON_AddItemToArray(arr, item);
+      node = node->next;
+    }
+  }
+  cJSON_AddItemToObject(root, "sensors", arr);
+  cJSON_AddStringToObject(root, "message", message);
+
+  char* json_str = cJSON_PrintUnformatted(root);
+  if (!json_str) { cJSON_Delete(root); return; }
+  if (mqtt_publish(MQTT_ALERT_TOPIC, json_str) != 0) {
+    fprintf(stderr, "Failed to publish MQTT fluctuation alert\n");
+  }
   cJSON_free(json_str);
   cJSON_Delete(root);
 }

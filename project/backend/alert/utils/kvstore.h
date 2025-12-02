@@ -28,7 +28,7 @@
 #include <stddef.h>
 #include <stdbool.h>
 #include <stdint.h>
-#include "../alert.h"
+#include "../alert_server.h"
 
 /* Hash table configuration */
 #define KV_HASH_BITS 3

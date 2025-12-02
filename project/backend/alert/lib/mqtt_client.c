@@ -31,7 +31,7 @@ int mqtt_init(void) {
     printf("Creating MQTT client: %s (ID: %s)\n", MQTT_BROKER, MQTT_CLIENT_ID);
     
     rc = MQTTClient_create(&client, MQTT_BROKER, MQTT_CLIENT_ID,
-                           MQTTCLIENT_PERSISTENCE_NONE, NULL);
+                           MQTTCLIENT_PERSISTENCE_DEFAULT, NULL);
     if (rc != MQTTCLIENT_SUCCESS) {
         fprintf(stderr, "MQTTClient_create failed, rc=%d\n", rc);
         return -1;

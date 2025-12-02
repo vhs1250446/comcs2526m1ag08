@@ -1,0 +1,543 @@
+[
+    {
+        "id": "fbb4856d0f0522f1",
+        "type": "tab",
+        "label": "Flow 1",
+        "disabled": false,
+        "info": "",
+        "env": []
+    },
+    {
+        "id": "ccdd68e91bdb33d9",
+        "type": "debug",
+        "z": "fbb4856d0f0522f1",
+        "name": "debug 1",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 560,
+        "y": 300,
+        "wires": []
+    },
+    {
+        "id": "5d15f4e119c02da4",
+        "type": "mqtt in",
+        "z": "fbb4856d0f0522f1",
+        "name": "",
+        "topic": "/comcs/g08/sensors/esp32",
+        "qos": "1",
+        "datatype": "json",
+        "broker": "7f2d9564175f3903",
+        "nl": false,
+        "rap": false,
+        "rh": 0,
+        "inputs": 0,
+        "x": 250,
+        "y": 100,
+        "wires": [
+            [
+                "d2e909cf1d39cc13",
+                "ccdd68e91bdb33d9"
+            ]
+        ]
+    },
+    {
+        "id": "ef3a779af075eb76",
+        "type": "mqtt in",
+        "z": "fbb4856d0f0522f1",
+        "name": "",
+        "topic": "/comcs/g08/sensors/rp2040",
+        "qos": "1",
+        "datatype": "json",
+        "broker": "7f2d9564175f3903",
+        "nl": false,
+        "rap": false,
+        "rh": 0,
+        "inputs": 0,
+        "x": 180,
+        "y": 320,
+        "wires": [
+            [
+                "2a413263f958ceb9",
+                "ccdd68e91bdb33d9"
+            ]
+        ]
+    },
+    {
+        "id": "2a413263f958ceb9",
+        "type": "json",
+        "z": "fbb4856d0f0522f1",
+        "name": "",
+        "property": "payload",
+        "action": "obj",
+        "pretty": false,
+        "x": 570,
+        "y": 480,
+        "wires": [
+            [
+                "f424060782278d96",
+                "ae00b9c652d28f2a"
+            ]
+        ]
+    },
+    {
+        "id": "970238a41fafbb88",
+        "type": "ui_chart",
+        "z": "fbb4856d0f0522f1",
+        "name": "",
+        "group": "57026cc7df7cb8d4",
+        "order": 1,
+        "width": 0,
+        "height": 0,
+        "label": "esp32-temperature",
+        "chartType": "line",
+        "legend": "false",
+        "xformat": "HH:mm:ss",
+        "interpolate": "linear",
+        "nodata": "",
+        "dot": false,
+        "ymin": "",
+        "ymax": "",
+        "removeOlder": 1,
+        "removeOlderPoints": "",
+        "removeOlderUnit": "3600",
+        "cutout": 0,
+        "useOneColor": false,
+        "useUTC": false,
+        "colors": [
+            "#1f77b4",
+            "#aec7e8",
+            "#ff7f0e",
+            "#2ca02c",
+            "#98df8a",
+            "#d62728",
+            "#ff9896",
+            "#9467bd",
+            "#c5b0d5"
+        ],
+        "outputs": 1,
+        "useDifferentColor": false,
+        "className": "",
+        "x": 1050,
+        "y": 180,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "d2e909cf1d39cc13",
+        "type": "json",
+        "z": "fbb4856d0f0522f1",
+        "name": "",
+        "property": "payload",
+        "action": "obj",
+        "pretty": false,
+        "x": 530,
+        "y": 60,
+        "wires": [
+            [
+                "1fe91eb0c57335b3",
+                "fbdaf9b21ea1a27a"
+            ]
+        ]
+    },
+    {
+        "id": "1fe91eb0c57335b3",
+        "type": "change",
+        "z": "fbb4856d0f0522f1",
+        "name": "Average Temperature",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "payload.averageTemperature",
+                "tot": "msg",
+                "dc": true
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 780,
+        "y": 180,
+        "wires": [
+            [
+                "970238a41fafbb88"
+            ]
+        ]
+    },
+    {
+        "id": "fbdaf9b21ea1a27a",
+        "type": "change",
+        "z": "fbb4856d0f0522f1",
+        "name": "Average Humidity",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "payload.averageHumidity",
+                "tot": "msg",
+                "dc": true
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 757,
+        "y": 80,
+        "wires": [
+            [
+                "f62b06617a77d833"
+            ]
+        ]
+    },
+    {
+        "id": "f62b06617a77d833",
+        "type": "ui_chart",
+        "z": "fbb4856d0f0522f1",
+        "name": "",
+        "group": "57026cc7df7cb8d4",
+        "order": 1,
+        "width": 0,
+        "height": 0,
+        "label": "esp32-humidity",
+        "chartType": "line",
+        "legend": "false",
+        "xformat": "HH:mm:ss",
+        "interpolate": "linear",
+        "nodata": "",
+        "dot": false,
+        "ymin": "",
+        "ymax": "",
+        "removeOlder": 1,
+        "removeOlderPoints": "",
+        "removeOlderUnit": "3600",
+        "cutout": 0,
+        "useOneColor": false,
+        "useUTC": false,
+        "colors": [
+            "#1f77b4",
+            "#aec7e8",
+            "#ff7f0e",
+            "#2ca02c",
+            "#98df8a",
+            "#d62728",
+            "#ff9896",
+            "#9467bd",
+            "#c5b0d5"
+        ],
+        "outputs": 1,
+        "useDifferentColor": false,
+        "className": "",
+        "x": 1000,
+        "y": 120,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "f424060782278d96",
+        "type": "change",
+        "z": "fbb4856d0f0522f1",
+        "name": "Average Temperature",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "payload.averageTemperature",
+                "tot": "msg",
+                "dc": true
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 760,
+        "y": 500,
+        "wires": [
+            [
+                "f1db37a6d1ed635b"
+            ]
+        ]
+    },
+    {
+        "id": "ae00b9c652d28f2a",
+        "type": "change",
+        "z": "fbb4856d0f0522f1",
+        "name": "Average Humidity",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "payload.averageHumidity",
+                "tot": "msg",
+                "dc": true
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 770,
+        "y": 400,
+        "wires": [
+            [
+                "620dbdd153d51fac"
+            ]
+        ]
+    },
+    {
+        "id": "f1db37a6d1ed635b",
+        "type": "ui_chart",
+        "z": "fbb4856d0f0522f1",
+        "name": "",
+        "group": "57026cc7df7cb8d4",
+        "order": 1,
+        "width": 0,
+        "height": 0,
+        "label": "rp2040-temperature",
+        "chartType": "line",
+        "legend": "false",
+        "xformat": "HH:mm:ss",
+        "interpolate": "linear",
+        "nodata": "",
+        "dot": false,
+        "ymin": "",
+        "ymax": "",
+        "removeOlder": 1,
+        "removeOlderPoints": "",
+        "removeOlderUnit": "3600",
+        "cutout": 0,
+        "useOneColor": false,
+        "useUTC": false,
+        "colors": [
+            "#1f77b4",
+            "#aec7e8",
+            "#ff7f0e",
+            "#2ca02c",
+            "#98df8a",
+            "#d62728",
+            "#ff9896",
+            "#9467bd",
+            "#c5b0d5"
+        ],
+        "outputs": 1,
+        "useDifferentColor": false,
+        "className": "",
+        "x": 1020,
+        "y": 520,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "620dbdd153d51fac",
+        "type": "ui_chart",
+        "z": "fbb4856d0f0522f1",
+        "name": "",
+        "group": "57026cc7df7cb8d4",
+        "order": 1,
+        "width": 0,
+        "height": 0,
+        "label": "rp2040-humidity",
+        "chartType": "line",
+        "legend": "false",
+        "xformat": "HH:mm:ss",
+        "interpolate": "linear",
+        "nodata": "",
+        "dot": false,
+        "ymin": "",
+        "ymax": "",
+        "removeOlder": 1,
+        "removeOlderPoints": "",
+        "removeOlderUnit": "3600",
+        "cutout": 0,
+        "useOneColor": false,
+        "useUTC": false,
+        "colors": [
+            "#1f77b4",
+            "#aec7e8",
+            "#ff7f0e",
+            "#2ca02c",
+            "#98df8a",
+            "#d62728",
+            "#ff9896",
+            "#9467bd",
+            "#c5b0d5"
+        ],
+        "outputs": 1,
+        "useDifferentColor": false,
+        "className": "",
+        "x": 1040,
+        "y": 420,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "576ed81e218a4933",
+        "type": "mqtt in",
+        "z": "fbb4856d0f0522f1",
+        "name": "",
+        "topic": "/comcs/g08/alerts",
+        "qos": "1",
+        "datatype": "json",
+        "broker": "7f2d9564175f3903",
+        "nl": false,
+        "rap": false,
+        "rh": 0,
+        "inputs": 0,
+        "x": 220,
+        "y": 580,
+        "wires": [
+            [
+                "2172776fe30bf733",
+                "ccdd68e91bdb33d9"
+            ]
+        ]
+    },
+    {
+        "id": "2172776fe30bf733",
+        "type": "json",
+        "z": "fbb4856d0f0522f1",
+        "name": "",
+        "property": "payload",
+        "action": "obj",
+        "pretty": false,
+        "x": 430,
+        "y": 640,
+        "wires": [
+            [
+                "69732d49b896b458"
+            ]
+        ]
+    },
+    {
+        "id": "69732d49b896b458",
+        "type": "change",
+        "z": "fbb4856d0f0522f1",
+        "name": "get alert",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "payload.alertType",
+                "tot": "msg",
+                "dc": true
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 620,
+        "y": 680,
+        "wires": [
+            [
+                "fcd0e315059cf54b"
+            ]
+        ]
+    },
+    {
+        "id": "fcd0e315059cf54b",
+        "type": "ui_toast",
+        "z": "fbb4856d0f0522f1",
+        "position": "top right",
+        "displayTime": "3",
+        "highlight": "",
+        "sendall": true,
+        "outputs": 0,
+        "ok": "OK",
+        "cancel": "",
+        "raw": false,
+        "className": "",
+        "topic": "Alert",
+        "name": "",
+        "x": 870,
+        "y": 700,
+        "wires": []
+    },
+    {
+        "id": "7f2d9564175f3903",
+        "type": "mqtt-broker",
+        "name": "eu.hivemq.cloud",
+        "broker": "2f0de4ef7266438a8f0a43350b1fa391.s1.eu.hivemq.cloud",
+        "port": "8883",
+        "tls": "c80603c327360862",
+        "clientid": "",
+        "autoConnect": true,
+        "usetls": true,
+        "protocolVersion": "5",
+        "keepalive": "60",
+        "cleansession": true,
+        "autoUnsubscribe": true,
+        "birthTopic": "",
+        "birthQos": "0",
+        "birthRetain": "false",
+        "birthPayload": "",
+        "birthMsg": {},
+        "closeTopic": "",
+        "closeQos": "0",
+        "closeRetain": "false",
+        "closePayload": "",
+        "closeMsg": {},
+        "willTopic": "",
+        "willQos": "0",
+        "willRetain": "false",
+        "willPayload": "",
+        "willMsg": {},
+        "userProps": "",
+        "sessionExpiry": ""
+    },
+    {
+        "id": "57026cc7df7cb8d4",
+        "type": "ui_group",
+        "name": "COMCS",
+        "tab": "219553f3ad290ae6",
+        "order": 1,
+        "disp": true,
+        "width": "6",
+        "collapse": false,
+        "className": ""
+    },
+    {
+        "id": "c80603c327360862",
+        "type": "tls-config",
+        "name": "",
+        "cert": "",
+        "key": "",
+        "ca": "",
+        "certname": "",
+        "keyname": "",
+        "caname": "",
+        "servername": "",
+        "verifyservercert": false,
+        "alpnprotocol": ""
+    },
+    {
+        "id": "219553f3ad290ae6",
+        "type": "ui_tab",
+        "name": "Home",
+        "icon": "dashboard",
+        "disabled": false,
+        "hidden": false
+    }
+]
