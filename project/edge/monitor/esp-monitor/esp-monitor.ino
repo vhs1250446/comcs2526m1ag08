@@ -34,10 +34,8 @@
 #define STORAGE_FILE "/storage.dat"
 
 // WiFi Configuration
-//static const char* ssid = "labs";
-//static const char* password = "782edcwq#";
-static const char* ssid = "jolteon";
-static const char* password = "scone3-rekindle-lisp";
+static const char* ssid = "labs";
+static const char* password = "782edcwq#";
 
 // NTP Configuration
 static const char* ntpServer1 = "pool.ntp.org";

@@ -74,7 +74,9 @@ static int send_packet_and_maybe_recv_ack(int sock, struct addrinfo *ai, uint32_
   struct sockaddr_storage src; socklen_t srclen = sizeof(src);
   int n = recvfrom(sock, ackBuf, (int)(ackBufSz - 1), 0, (struct sockaddr*)&src, &srclen);
   if (n < 0) {
-    if (errno == EAGAIN || errno == EWOULDBLOCK) return 0; // no data
+    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+      return 0; // no data
+    }
     perror("recvfrom");
     return -1;
   }

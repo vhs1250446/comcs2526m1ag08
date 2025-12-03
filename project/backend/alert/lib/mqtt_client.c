@@ -27,21 +27,21 @@ int mqtt_init(void) {
     MQTTClient_connectOptions conn_opts = MQTTClient_connectOptions_initializer;
     MQTTClient_SSLOptions ssl_opts = MQTTClient_SSLOptions_initializer;
     int rc;
-    
+
     printf("Creating MQTT client: %s (ID: %s)\n", MQTT_BROKER, MQTT_CLIENT_ID);
-    
+
     rc = MQTTClient_create(&client, MQTT_BROKER, MQTT_CLIENT_ID,
                            MQTTCLIENT_PERSISTENCE_DEFAULT, NULL);
     if (rc != MQTTCLIENT_SUCCESS) {
         fprintf(stderr, "MQTTClient_create failed, rc=%d\n", rc);
         return -1;
     }
-    
+
     // Configure TLS/SSL (insecure - no cert verification)
     ssl_opts.enableServerCertAuth = 0;
     ssl_opts.verify = 0;
     ssl_opts.enabledCipherSuites = NULL;
-    
+
     conn_opts.keepAliveInterval = 30;
     conn_opts.cleansession = 1;
     conn_opts.username = MQTT_USERNAME;
@@ -49,10 +49,8 @@ int mqtt_init(void) {
     conn_opts.ssl = &ssl_opts;
     conn_opts.connectTimeout = 30;
     conn_opts.automaticReconnect = 1;    // enable auto-reconnect
-    conn_opts.minRetryInterval = 1;      // seconds
-    conn_opts.maxRetryInterval = 30; 
     conn_opts.MQTTVersion = MQTTVERSION_3_1_1;  // Force MQTT 3.1.1
-    
+
     printf("Attempting MQTT connection (user: %s)...\n", MQTT_USERNAME);
     rc = MQTTClient_connect(client, &conn_opts);
     if (rc != MQTTCLIENT_SUCCESS) {
@@ -62,7 +60,7 @@ int mqtt_init(void) {
         MQTTClient_destroy(&client);
         return -1;
     }
-    
+
     mqtt_connected = 1;
     printf("MQTT client connected successfully\n");
     return 0;
@@ -70,21 +68,21 @@ int mqtt_init(void) {
 
 int mqtt_publish(const char* topic, const char* payload) {
     if (!mqtt_connected) return -1;
-    
+
     MQTTClient_message pubmsg = MQTTClient_message_initializer;
     MQTTClient_deliveryToken token;
     int rc;
-    
+
     pubmsg.payload = (void*)payload;
     pubmsg.payloadlen = strlen(payload);
     pubmsg.qos = QOS;
     pubmsg.retained = 0;
-    
+
     if ((rc = MQTTClient_publishMessage(client, topic, &pubmsg, &token)) != MQTTCLIENT_SUCCESS) {
         fprintf(stderr, "Failed to publish message, return code %d\n", rc);
         return -1;
     }
-    
+
     rc = MQTTClient_waitForCompletion(client, token, TIMEOUT);
     printf("MQTT alert published to %s\n", topic);
     return 0;

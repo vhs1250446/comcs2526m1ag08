@@ -36,7 +36,8 @@ static struct kv_store device_store;
 
 
 int main(void) {
-  struct addrinfo req, *list;
+  struct addrinfo req;
+  struct addrinfo *list;
   struct sockaddr_storage client_addr;
   socklen_t client_addr_len = sizeof(client_addr);
   char buffer[BUFFER_SIZE];
@@ -95,55 +96,57 @@ int main(void) {
     int recv_len;
     memset(buffer, 0, BUFFER_SIZE);
 
+    // bytes received may vary from packet to packet
+    // due to temp and humidity readings
     recv_len = recvfrom(server_socket, buffer, BUFFER_SIZE - 1, 0,
                         (struct sockaddr*)&client_addr, &client_addr_len);
 
     if (recv_len < 0) {
-      if (errno == EINTR) continue;
+      if (errno == EINTR) {
+        continue;
+      }
       perror("recvfrom failed");
       continue;
     }
 
     buffer[recv_len] = '\0'; // make sure to stringify the received data
 
-    // Parse UDP QoS header if present
-    UdpQoSHeader* qos_hdr = NULL;
-    char* json_payload = buffer;
-    int json_len = recv_len;
-    
-    if (recv_len >= (int)sizeof(UdpQoSHeader)) {
-      qos_hdr = (UdpQoSHeader*)buffer;
-      json_payload = buffer + sizeof(UdpQoSHeader);
-      json_len = recv_len - sizeof(UdpQoSHeader);
-      json_payload[json_len] = '\0';
-      
-      printf("QoS Header: seq=%u qos=%u flags=0x%02x%s\n",
-             qos_hdr->seq,
-             qos_hdr->qos,
-             qos_hdr->flags,
-             (qos_hdr->flags & 0x01) ? " [RETRANS]" : "");
-    }
-
-    // Allocate request structure for thread
-    ClientRequest* request = malloc(sizeof(ClientRequest));
-    if (!request) {
-      printf("Memory allocation failed\n");
-      continue;
-    }
-
     if(getnameinfo((struct sockaddr *)&client_addr, client_addr_len,
-                    client_ip, LOG_BUFFER_SIZE,
-                    client_port, LOG_BUFFER_SIZE,
-                    NI_NUMERICHOST|NI_NUMERICSERV)) {
+                   client_ip, LOG_BUFFER_SIZE,
+                   client_port, LOG_BUFFER_SIZE,
+                   NI_NUMERICHOST|NI_NUMERICSERV)) {
       printf("Failed to get client address\n");
     } else {
       printf("Received %d bytes from %s:%s\n", recv_len, client_ip, client_port);
     }
 
+    // Parse UDP QoS header and extract JSON payload
+    UdpQoSHeader* qos_hdr = NULL;
+    char* json_payload = buffer;
+    int json_len = recv_len;
+
+    qos_hdr = (UdpQoSHeader*)buffer;
+    json_payload = buffer + sizeof(UdpQoSHeader);
+    json_len = recv_len - sizeof(UdpQoSHeader);
+    json_payload[json_len] = '\0';
+
+    printf("QoS Header: seq=%u qos=%u flags=0x%02x%s\n",
+           qos_hdr->seq, // sequence number
+           qos_hdr->qos, // quality of service level (0=best effort, 1=guaranteed)
+           qos_hdr->flags, // retransmission flag
+           (qos_hdr->flags & 0x01) ? " [RETRANS]" : "");
+
+    // Allocate request structure for thread
+    ClientRequest* request = malloc(sizeof(ClientRequest));
+    if (!request) {
+      printf("Memory allocation failed for client request\n");
+      continue;
+    }
+
     request->client_addr = client_addr;
     request->data_len = json_len;
     memcpy(request->data, json_payload, json_len + 1);
-    
+
     // Store QoS info for ACK handling
     if (qos_hdr) {
       request->qos_level = qos_hdr->qos;
@@ -180,15 +183,40 @@ void* handle_client(void* arg) {
   int range_violation;
   int fluctuation_alert;
 
+  // Note: retransmission flag alone is not sufficient for deduplication.
+  // We will deduplicate by comparing against the last stored reading.
+
   // Parse JSON data (smartdata model format)
   if (parse_sensor_data(request->data, &data) != 0) {
     fprintf(stderr, "Failed to parse sensor data\n");
     free(request);
     return NULL;
   }
-  printf("Parsed: ID        = %s\n\tTemp      = %.2f°C\n\tHumidity  = %.2f%%\n\tAvgTemp   = %.2f°C\n\tAvgHum    = %.2f%%\n",
-         data.sensor_id, data.temperature, data.humidity,
+  printf("Parsed: ID        = %sTime      = %.2f°C\n\t\n\tTemp      = %.2f°C\n\tHumidity  = %.2f%%\n\tAvgTemp   = %.2f°C\n\tAvgHum    = %.2f%%\n",
+         data.sensor_id, data.timestamp, data.temperature, data.humidity,
          data.avgTemperature, data.avgHumidity);
+
+  // if we already have the reading stored, skip processing and if needed send ACK
+  SensorData existing;
+  int have_existing = kv_store_get(&device_store, data.sensor_id, &existing) == 0;
+  if (have_existing) {
+    int same_timestamp = strcmp(existing.timestamp, data.timestamp) == 0;
+    int same_values = (existing.temperature == data.temperature) &&
+                      (existing.humidity == data.humidity) &&
+                      (existing.avgTemperature == data.avgTemperature) &&
+                      (existing.avgHumidity == data.avgHumidity);
+    if (same_timestamp && same_values) {
+      printf("Duplicate reading for %s detected, skipping processing\n", data.sensor_id);
+      if (request->has_qos && request->qos_level == UDP_QOS_GUARANTEED) {
+        socklen_t addr_len = (request->client_addr.ss_family == AF_INET)
+            ? sizeof(struct sockaddr_in)
+            : sizeof(struct sockaddr_in6);
+        send_ack(&request->client_addr, addr_len, request->seq_num);
+      }
+      free(request);
+      return NULL;
+    }
+  }
 
   // Store/update device reading in KV store
   if (kv_store_put(&device_store, data.sensor_id, &data) != 0) {
@@ -196,10 +224,10 @@ void* handle_client(void* arg) {
   }
 
   // Send ACK for guaranteed delivery
-  if (request->has_qos && request->qos_level == UDP_QOS_GUARANTEED) {
-    socklen_t addr_len = (request->client_addr.ss_family == AF_INET) 
-                          ? sizeof(struct sockaddr_in) 
-                          : sizeof(struct sockaddr_in6);
+  if (request->qos_level == UDP_QOS_GUARANTEED) {
+    socklen_t addr_len = (request->client_addr.ss_family == AF_INET)
+      ? sizeof(struct sockaddr_in)
+      : sizeof(struct sockaddr_in6);
     send_ack(&request->client_addr, addr_len, request->seq_num);
   }
 
@@ -226,7 +254,7 @@ int validate_sensor_data(SensorData* data, char* alert_msg) {
   if (data->temperature < TEMP_MIN || data->temperature > TEMP_MAX) {
     snprintf(temp_buf, sizeof(temp_buf),
              "Temp OUT OF RANGE: %.2f°C (valid: %.1f-%.1f°C)\n",
-            data->temperature, TEMP_MIN, TEMP_MAX);
+             data->temperature, TEMP_MIN, TEMP_MAX);
     strcat(alert_msg, temp_buf);
     alert = 1;
   }
@@ -235,7 +263,7 @@ int validate_sensor_data(SensorData* data, char* alert_msg) {
   if (data->humidity < HUMIDITY_MIN || data->humidity > HUMIDITY_MAX) {
     snprintf(temp_buf, sizeof(temp_buf),
              "Hum OUT OF RANGE: %.2f%% (valid: %.1f-%.1f%%)\n",
-            data->humidity, HUMIDITY_MIN, HUMIDITY_MAX);
+             data->humidity, HUMIDITY_MIN, HUMIDITY_MAX);
     strcat(alert_msg, temp_buf);
     alert = 1;
   }
@@ -298,13 +326,13 @@ int check_fluctuation(SensorData* current, char* alert_msg) {
         if (hdiff > max_humidity_diff) max_humidity_diff = hdiff;
         if (tdiff > TEMP_DIFF_THRESHOLD) {
           snprintf(temp_buf, sizeof(temp_buf),
-                 "TempDiff: CurrentID=%s OtherID=%s Cur=%.2f Other=%.2f Diff=%.2f (Thr=%.1f)\n",
-                 current->sensor_id,
-                 node->data.sensor_id,
-                 current->temperature,
-                 node->data.temperature,
-                 tdiff,
-                 TEMP_DIFF_THRESHOLD);
+                   "TempDiff: CurrentID=%s OtherID=%s Cur=%.2f Other=%.2f Diff=%.2f (Thr=%.1f)\n",
+                   current->sensor_id,
+                   node->data.sensor_id,
+                   current->temperature,
+                   node->data.temperature,
+                   tdiff,
+                   TEMP_DIFF_THRESHOLD);
           strcat(alert_msg, temp_buf);
           alert = 1;
         }
@@ -326,13 +354,13 @@ int check_fluctuation(SensorData* current, char* alert_msg) {
 
   if (alert) {
     snprintf(temp_buf, sizeof(temp_buf),
-           "Summary: Sensor=%s Time=%s ComparedDevices=%d Stale=%d MaxTempDiff=%.2f MaxHumDiff=%.2f\n",
-           current->sensor_id,
-           current->timestamp,
-           device_counter,
-           stale_counter,
-           max_temp_diff,
-           max_humidity_diff);
+             "Summary: Sensor=%s Time=%s ComparedDevices=%d Stale=%d MaxTempDiff=%.2f MaxHumDiff=%.2f\n",
+             current->sensor_id,
+             current->timestamp,
+             device_counter,
+             stale_counter,
+             max_temp_diff,
+             max_humidity_diff);
     strcat(alert_msg, temp_buf);
     printf("Fluctuation Alert: %s\n", alert_msg);
   }
@@ -342,10 +370,10 @@ int check_fluctuation(SensorData* current, char* alert_msg) {
 void send_ack(struct sockaddr_storage* client_addr, socklen_t addr_len, uint32_t seq) {
   char ack_buf[32];
   snprintf(ack_buf, sizeof(ack_buf), "ACK %u", seq);
-  
+
   int sent = sendto(server_socket, ack_buf, strlen(ack_buf), 0,
                     (struct sockaddr*)client_addr, addr_len);
-  
+
   if (sent < 0) {
     perror("sendto ACK failed");
   } else {
