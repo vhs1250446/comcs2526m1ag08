@@ -63,7 +63,4 @@ digraph SystemArchitecture {
     // Resilience Flow
     SPIFFS -> MQTT [label=" 7. Send Stored Data (on restore)", style=dotted, constraint=false];
     SPIFFS -> UDP [label=" 7. Send Stored Data (on restore)", style=dotted, constraint=false];
-
-    // Bonus Flow
-    CLIENTS -> CC [label=" Bonus: BLE Redundancy", style=dotted, constraint=false];
 }

@@ -42,12 +42,15 @@ int mqtt_init(void) {
     ssl_opts.verify = 0;
     ssl_opts.enabledCipherSuites = NULL;
     
-    conn_opts.keepAliveInterval = 60;
+    conn_opts.keepAliveInterval = 30;
     conn_opts.cleansession = 1;
     conn_opts.username = MQTT_USERNAME;
     conn_opts.password = MQTT_PASSWORD;
     conn_opts.ssl = &ssl_opts;
     conn_opts.connectTimeout = 30;
+    conn_opts.automaticReconnect = 1;    // enable auto-reconnect
+    conn_opts.minRetryInterval = 1;      // seconds
+    conn_opts.maxRetryInterval = 30; 
     conn_opts.MQTTVersion = MQTTVERSION_3_1_1;  // Force MQTT 3.1.1
     
     printf("Attempting MQTT connection (user: %s)...\n", MQTT_USERNAME);

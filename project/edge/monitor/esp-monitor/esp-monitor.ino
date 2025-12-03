@@ -28,7 +28,7 @@
 // DHT Sensor Configuration
 #define DHTPIN 21
 #define DHTTYPE DHT11
-#define SENSOR_READ_INTERVAL_MS 5000
+#define SENSOR_READ_INTERVAL_MS 1000
 
 // Storage file path
 #define STORAGE_FILE "/storage.dat"
